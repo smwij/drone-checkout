@@ -1,0 +1,12 @@
+{
+  "name": "trd-drone-checkout",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Borrow/return web app for the TRD drone fleet, backed by Notion databases.",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

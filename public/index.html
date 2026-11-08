@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>TRD Drone Checkout</title>
+<style>
+/* Layout: iOS liquid-glass — large title, grouped inset list on gray, frosted panes over fixed color pools. */
+:root{
+  --bg:#c9c9d1;
+  --panel:rgba(255,255,255,.4);
+  --field:rgba(255,255,255,.42);
+  --glass-line:rgba(255,255,255,.6);
+  --fg:#000000;
+  --muted:#6c6c70;
+  --faint:#aeaeb2;
+  --line:rgba(60,60,67,.14);
+  --accent:#007aff;
+  --accent-tint:rgba(0,122,255,.12);
+  --ok:#6dba85;
+  --ok-text:#41795a;
+  --ok-tint:rgba(109,186,133,.22);
+  --warn:#e6bc6d;
+  --warn-text:#6f5318;
+  --warn-tint:rgba(228,178,86,.48);
+  --bad:#e07a70;
+  --bad-text:#b05549;
+  --bad-tint:rgba(224,122,112,.18);
+  --gray:#8e8e93;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue","Segoe UI",Roboto,sans-serif;
+}
+html,body{margin:0}
+body{
+  background:var(--bg);
+  color:var(--fg); font-family:var(--font); font-size:15px; line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:calc(56px + env(safe-area-inset-bottom,0px));
+  -webkit-font-smoothing:antialiased;
+}
+/* Fixed color pools behind the page: the frosted panes blur these, which is what reads as glass. */
+body::before{content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background-color:var(--bg);
+  background-image:
+    radial-gradient(420px 420px at 16% 8%, rgba(92,138,255,.65), transparent 70%),
+    radial-gradient(560px 560px at 90% 24%, rgba(174,118,255,.55), transparent 70%),
+    radial-gradient(520px 520px at 26% 90%, rgba(80,202,216,.55), transparent 70%),
+    radial-gradient(380px 380px at 72% 70%, rgba(255,255,255,.7), transparent 70%),
+    radial-gradient(300px 300px at 55% 40%, rgba(255,170,120,.35), transparent 70%)}
+.wrap{max-width:760px; margin:0 auto}
+[hidden]{display:none!important}
+
+/* ---- nav + large title ---- */
+.navrow{display:flex; justify-content:flex-end; gap:20px; padding-block:14px 0}
+.navrow a{color:var(--accent); text-decoration:none; font-size:15px}
+.navrow a:active{opacity:.5}
+header.top{padding-block:4px 16px}
+h1{font-size:32px; font-weight:700; letter-spacing:.2px; margin:0; line-height:1.2; text-wrap:balance}
+.sub{color:var(--muted); font-size:14px; margin:4px 0 0}
+
+/* ---- stat tiles ---- */
+.summary{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-block:0 16px}
+.stat{border-radius:16px; padding:12px 14px 10px; color:#ffffff; border:1px solid rgba(255,255,255,.45);
+  backdrop-filter:blur(18px) saturate(1.4); -webkit-backdrop-filter:blur(18px) saturate(1.4);
+  box-shadow:0 8px 24px rgba(40,40,60,.16), inset 0 1px 0 rgba(255,255,255,.45)}
+.stat.ok{background:rgba(109,186,133,.88)}
+.stat.warn{background:rgba(230,188,109,.92); color:#453312}
+.stat.bad{background:rgba(224,122,112,.88)}
+.stat.gray{background:rgba(142,142,150,.78)}
+.stat span{display:block; font-size:12px; font-weight:600; opacity:.95}
+.stat b{display:block; font-size:27px; font-weight:700; line-height:1.25; font-variant-numeric:tabular-nums}
+
+/* ---- search + filters ---- */
+.toolbar{display:flex; flex-wrap:wrap; gap:8px; margin-block:0 8px}
+.toolbar input[type=search]{flex:2 1 240px}
+.toolbar select{flex:1 1 130px}
+input,select,textarea,button{font:inherit; color:inherit}
+input,select,textarea{background:var(--field); border:1px solid var(--glass-line); border-radius:11px; padding:8px 12px; min-width:0; height:38px; box-sizing:border-box;
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px)}
+input::placeholder{color:var(--faint)}
+input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
+.meta-line{display:flex; justify-content:space-between; gap:12px; color:rgba(60,60,67,.6); font-size:12px; margin-block:0 8px; padding-inline:14px; flex-wrap:wrap; text-transform:uppercase; letter-spacing:.04em}
+
+/* ---- grouped inset list ---- */
+ul.items{list-style:none; margin:0; padding:0; background:var(--panel); border-radius:18px; overflow:hidden;
+  border:1px solid var(--glass-line); backdrop-filter:blur(22px) saturate(1.6); -webkit-backdrop-filter:blur(22px) saturate(1.6);
+  box-shadow:0 10px 30px rgba(40,40,60,.16), inset 0 1px 0 rgba(255,255,255,.6)}
+li.item{padding:13px 16px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 14px; align-items:center}
+li.item + li.item{border-top:.5px solid var(--line)}
+li.item.overdue{background:var(--bad-tint)}
+.iname{font-weight:600; font-size:16px; min-width:0; overflow-wrap:anywhere}
+.iname a{color:inherit; text-decoration:none}
+.iname a:active{opacity:.5}
+.imeta{grid-column:1; color:var(--muted); font-size:13px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; min-width:0}
+.tag{background:var(--field); border-radius:6px; padding:1px 8px; font-size:12px; font-weight:500; white-space:nowrap}
+.serial{font-variant-numeric:tabular-nums; color:var(--faint); overflow-wrap:anywhere}
+.chip{display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:600;
+  border-radius:999px; padding:4px 11px; white-space:nowrap}
+.chip::before{content:""; width:7px; height:7px; border-radius:50%; background:currentColor}
+.chip.av{background:var(--ok-tint); color:var(--ok-text)}
+.chip.bo{background:var(--warn-tint); color:var(--warn-text)}
+.chip.un,.chip.od{background:var(--bad-tint); color:var(--bad-text)}
+li.item.overdue .chip.od{background:var(--bad); color:#fff}
+li.item.overdue .chip.od::before{background:#fff}
+.icell{grid-column:2; grid-row:1 / span 2; display:flex; flex-direction:column; align-items:flex-end; gap:8px}
+.binfo{grid-column:1 / -1; display:flex; flex-wrap:wrap; gap:6px 26px; margin-top:7px; padding-top:9px; border-top:.5px solid var(--line); min-width:0}
+.bf{display:flex; flex-direction:column; min-width:0}
+.bf small{font-size:11px; font-weight:600; color:var(--faint); text-transform:uppercase; letter-spacing:.05em}
+.bf span{font-size:14px; overflow-wrap:anywhere}
+.bf.due span{color:var(--warn-text); font-weight:600}
+.bf.due.od span{color:var(--bad-text); font-weight:600}
+button.act{background:rgba(96,150,214,.9); color:#ffffff; border:0; border-radius:999px;
+  padding:0 18px; height:34px; min-width:96px; font-weight:600; font-size:15px; cursor:pointer}
+button.act:active{opacity:.7}
+button.act.secondary{background:rgba(255,255,255,.55); color:var(--accent); border:1px solid var(--glass-line);
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); box-shadow:none}
+button.act:disabled{opacity:.45; cursor:default}
+.empty,.banner{background:var(--panel); border-radius:18px; padding:30px 20px; text-align:center; color:var(--muted);
+  border:1px solid var(--glass-line); backdrop-filter:blur(24px) saturate(1.5); -webkit-backdrop-filter:blur(24px) saturate(1.5);
+  box-shadow:0 10px 30px rgba(40,40,60,.14)}
+.banner.error{color:var(--fg)}
+.banner.error .fix{color:var(--muted); font-size:13px; margin-top:6px}
+footer{margin-top:24px; text-align:center; color:rgba(60,60,67,.6); font-size:12px; padding-inline:14px}
+
+/* ---- sheet-style dialog ---- */
+dialog{background:rgba(238,238,243,.72); color:var(--fg); border:1px solid rgba(255,255,255,.65); border-radius:22px; padding:0; width:min(420px,92vw);
+  backdrop-filter:blur(32px) saturate(1.6); -webkit-backdrop-filter:blur(32px) saturate(1.6);
+  box-shadow:0 24px 70px rgba(20,20,35,.35), inset 0 1px 0 rgba(255,255,255,.6)}
+dialog::backdrop{background:rgba(0,0,0,.35)}
+.dhead{padding:20px 20px 6px; text-align:center}
+dialog h2{font-size:18px; font-weight:700; margin:0}
+dialog .dmeta{color:var(--muted); font-size:13px; margin:3px 0 0; overflow-wrap:anywhere}
+dialog form{display:flex; flex-direction:column; gap:12px; padding:12px 20px 20px}
+dialog label{display:flex; flex-direction:column; gap:5px; font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em}
+dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-spacing:normal; background:rgba(255,255,255,.55); height:42px}
+.dbtns{display:flex; flex-direction:column-reverse; gap:8px; margin-top:8px}
+.dbtns button.act{height:46px; border-radius:13px; font-size:16px; min-width:0; width:100%}
+.derr{color:var(--bad-text); font-size:13px; margin:0; display:none; text-align:center}
+
+@media (max-width:640px){
+  .summary{grid-template-columns:repeat(2,1fr)}
+}
+@media (max-width:480px){
+  li.item{grid-template-columns:1fr}
+  .icell{grid-column:1; grid-row:auto; flex-direction:row; align-items:center; justify-content:space-between}
+  h1{font-size:28px}
+}
+@media (prefers-reduced-motion: no-preference){
+  li.item.pending{animation:pulse 1.2s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.55}}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <nav class="navrow">
+    <a href="https://app.notion.com/p/412ba2f496588187ad64f6d70c15cff9" target="_blank" rel="noopener">Stock database</a>
+    <a href="https://app.notion.com/p/1902f54054e04a168ec5980f78b112f0" target="_blank" rel="noopener">Borrow log</a>
+  </nav>
+  <header class="top">
+    <h1>Drone Checkout</h1>
+    <p class="sub">Borrow and return TRD fleet equipment. Records save to the Notion Borrow Log.</p>
+  </header>
+
+  <div class="summary" id="summary" hidden>
+    <div class="stat ok"><span>Available</span><b id="nAvail">–</b></div>
+    <div class="stat warn"><span>Borrowed</span><b id="nBorrowed">–</b></div>
+    <div class="stat bad"><span>Overdue</span><b id="nOverdue">–</b></div>
+    <div class="stat gray"><span>Total items</span><b id="nTotal">–</b></div>
+  </div>
+
+  <div class="toolbar" id="toolbar" hidden>
+    <input type="search" id="q" placeholder="Search name or serial…" aria-label="Search items">
+    <select id="fType" aria-label="Filter by type"><option value="">All types</option></select>
+    <select id="fVendor" aria-label="Filter by vendor"><option value="">All vendors</option></select>
+    <select id="fStatus" aria-label="Filter by status">
+      <option value="">Any status</option>
+      <option value="Available">Available</option>
+      <option value="Borrowed">Borrowed</option>
+      <option value="Overdue">Overdue</option>
+      <option value="Unavailable">Unavailable</option>
+    </select>
+  </div>
+
+  <p class="meta-line" id="metaLine" hidden><span id="countLine"></span><span id="updatedLine"></span></p>
+
+  <div id="gate" class="empty" hidden>
+    <p style="margin:0 0 12px">This page is for the TRD drone team. Enter the team access key to continue.</p>
+    <form id="gForm" style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap">
+      <input id="gKey" type="password" placeholder="Access key" aria-label="Team access key">
+      <button class="act" type="submit">Unlock</button>
+    </form>
+  </div>
+
+  <div id="status" class="empty">Loading inventory…</div>
+  <ul class="items" id="list"></ul>
+
+  <footer>TRD drone team · records live in the Notion Borrow Log · this page never edits the stock database</footer>
+</div>
+
+<dialog id="dlg">
+  <div class="dhead">
+    <h2 id="dTitle">Borrow</h2>
+    <p class="dmeta" id="dMeta"></p>
+  </div>
+  <form id="dForm">
+    <label id="lName">Your name
+      <input id="fName" required maxlength="80" autocomplete="off">
+    </label>
+    <label id="lProj">Project
+      <input id="fProj" maxlength="100" autocomplete="off" placeholder="e.g. RAFO, QC, MKT demo">
+    </label>
+    <label id="lDest">Where is it going?
+      <input id="fDest" maxlength="120" autocomplete="off" placeholder="e.g. Test site Bangpu, customer site">
+    </label>
+    <label id="lDue">Due back
+      <input id="fDue" type="date">
+    </label>
+    <label id="lNote">Purpose / note (optional)
+      <input id="fNote" maxlength="200" autocomplete="off">
+    </label>
+    <p class="derr" id="dErr"></p>
+    <div class="dbtns">
+      <button type="button" class="act secondary" id="dCancel">Cancel</button>
+      <button type="submit" class="act" id="dSubmit">Borrow</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+let items = [];           // stock rows (read-only)
+let records = [];         // borrow-log rows, newest first
+let haveData = false;
+let pendingUrl = null;
+let dlgItem = null, dlgMode = "borrow";
+
+async function api(url, opts){
+  let key = "";
+  try { key = localStorage.getItem("trd-key") || ""; } catch(e){}
+  const r = await fetch(url, Object.assign({ headers: { "Content-Type": "application/json", "X-Team-Key": key } }, opts));
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok){ const e = new Error(r.status === 401 ? "Wrong or missing access key." : (d.error || ("HTTP " + r.status))); e.status = r.status; throw e; }
+  return d;
+}
+
+// Latest open (not returned) log record per stock-item URL.
+function openRecords(){
+  const open = new Map();
+  for (let i = records.length - 1; i >= 0; i--){   // oldest → newest so newest wins
+    const r = records[i];
+    if (!r.item) continue;
+    if (r.status === "Borrowed" && !r.ron) open.set(r.item, r);
+    else if (r.status === "Returned" && open.get(r.item) && open.get(r.item).url === r.url) open.delete(r.item);
+  }
+  return open;
+}
+let openMap = new Map();
+
+function statusOf(it){
+  if (openMap.has(it.url)) return "Borrowed";
+  if (it.location === "Destroyed") return "Unavailable";
+  return "Available";
+}
+function isOverdue(it){
+  const r = openMap.get(it.url);
+  return !!(r && r.due && r.due.slice(0,10) < todayISO());
+}
+
+function showBanner(title, fix){
+  const el = $("status");
+  el.hidden = false;
+  el.className = "banner error";
+  el.innerHTML = "<div>" + esc(title) + "</div><div class='fix'>" + esc(fix) + "</div>";
+}
+
+function populateFilters(){
+  const fill = (sel, values) => {
+    const cur = sel.value;
+    sel.length = 1;
+    [...values].sort().forEach(v => sel.add(new Option(v, v)));
+    sel.value = cur;
+  };
+  fill($("fType"), new Set(items.map(i => i.type).filter(Boolean)));
+  fill($("fVendor"), new Set(items.map(i => i.vendor).filter(Boolean)));
+}
+
+function fmtDate(s){
+  if (!s) return "";
+  const d = new Date(s.slice(0,10) + "T00:00:00");
+  return isNaN(d) ? s.slice(0,10) : d.toLocaleDateString(undefined, {day:"numeric", month:"short", year:"numeric"});
+}
+
+function render(){
+  if (!haveData) return;
+  openMap = openRecords();
+  $("summary").hidden = false;
+  $("toolbar").hidden = false;
+  $("metaLine").hidden = false;
+
+  $("nAvail").textContent = items.filter(i => statusOf(i) === "Available").length;
+  $("nBorrowed").textContent = items.filter(i => statusOf(i) === "Borrowed").length;
+  $("nOverdue").textContent = items.filter(isOverdue).length;
+  $("nTotal").textContent = items.length;
+
+  const q = $("q").value.trim().toLowerCase();
+  const ft = $("fType").value, fv = $("fVendor").value, fs = $("fStatus").value;
+  const shown = items.filter(it => {
+    if (q && !((it.Name||"").toLowerCase().includes(q) || (it.serial||"").toLowerCase().includes(q))) return false;
+    if (ft && it.type !== ft) return false;
+    if (fv && it.vendor !== fv) return false;
+    if (fs === "Overdue") return isOverdue(it);
+    if (fs && statusOf(it) !== fs) return false;
+    return true;
+  });
+
+  $("countLine").textContent = shown.length === items.length
+    ? items.length + " items" : shown.length + " of " + items.length + " items";
+
+  const st = $("status");
+  if (!shown.length){ st.hidden = false; st.className = "empty"; st.textContent = "No items match."; }
+  else st.hidden = true;
+
+  $("list").innerHTML = shown.map(it => {
+    const s = statusOf(it), od = isOverdue(it), pend = it.url === pendingUrl;
+    const rec = openMap.get(it.url);
+    const chip = od ? '<span class="chip od">Overdue</span>'
+      : s === "Borrowed" ? '<span class="chip bo">Borrowed</span>'
+      : s === "Unavailable" ? '<span class="chip un">Unavailable</span>'
+      : '<span class="chip av">Available</span>';
+    const btn = s === "Borrowed"
+      ? '<button class="act secondary" data-return="' + esc(it.url) + '"' + (pend ? " disabled" : "") + '>Return</button>'
+      : s === "Available"
+      ? '<button class="act" data-borrow="' + esc(it.url) + '"' + (pend ? " disabled" : "") + '>Borrow</button>' : "";
+    const bf = (label, val, cls) => val ? '<div class="bf' + (cls || "") + '"><small>' + label + '</small><span>' + esc(val) + "</span></div>" : "";
+    const who = rec
+      ? '<div class="binfo">' +
+        bf("Borrower", rec.borrower || "someone") +
+        bf("Project", rec.project || "—") +
+        bf("Going to", rec.dest || "—") +
+        bf(od ? "Was due" : "Due back", fmtDate(rec.due), od ? " due od" : " due") +
+        bf("Since", fmtDate(rec.bon)) +
+        bf("Note", rec.note) +
+        "</div>" : "";
+    return '<li class="item' + (od ? " overdue" : "") + (pend ? " pending" : "") + '">' +
+      '<div class="iname"><a href="' + esc(it.url) + '" target="_blank" rel="noopener" title="Open in Notion">' + esc(it.Name || "(unnamed)") + "</a></div>" +
+      '<div class="imeta">' +
+        (it.type ? '<span class="tag">' + esc(it.type) + "</span>" : "") +
+        (it.vendor ? '<span class="tag">' + esc(it.vendor) + "</span>" : "") +
+        (it.serial ? '<span class="serial">SN ' + esc(it.serial) + "</span>" : "") +
+      "</div>" + who +
+      '<div class="icell">' + chip + btn + "</div></li>";
+  }).join("");
+}
+
+function openDialog(it, mode){
+  dlgItem = it; dlgMode = mode;
+  const borrow = mode === "borrow";
+  const rec = openMap.get(it.url);
+  $("dTitle").textContent = borrow ? "Borrow" : "Return";
+  $("dMeta").textContent = (it.Name || "(unnamed)") + (it.serial ? " · SN " + it.serial : "") +
+    (!borrow && rec && rec.borrower ? " — with " + rec.borrower : "");
+  $("lProj").hidden = !borrow;
+  $("lDest").hidden = !borrow;
+  $("lDue").hidden = !borrow;
+  $("lNote").hidden = !borrow;
+  $("lName").firstChild.textContent = borrow ? "Your name " : "Returned by ";
+  let saved = "";
+  try { saved = localStorage.getItem("trd-borrower") || ""; } catch(e){}
+  $("fName").value = (!borrow && rec && rec.borrower) ? rec.borrower : saved;
+  if (borrow){
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    $("fDue").value = d.toISOString().slice(0,10);
+    $("fNote").value = "";
+    let proj = "", dst = "";
+    try { proj = localStorage.getItem("trd-project") || ""; dst = localStorage.getItem("trd-dest") || ""; } catch(e){}
+    $("fProj").value = proj;
+    $("fDest").value = dst;
+  }
+  $("dErr").style.display = "none";
+  $("dSubmit").textContent = borrow ? "Confirm borrow" : "Confirm return";
+  $("dSubmit").disabled = false;
+  $("dlg").showModal();
+}
+
+async function submitDialog(ev){
+  ev.preventDefault();
+  if (!dlgItem) return;
+  const it = dlgItem, borrow = dlgMode === "borrow";
+  const name = $("fName").value.trim();
+  if (!name) return;
+  try { localStorage.setItem("trd-borrower", name); } catch(e){}
+  const due = borrow ? $("fDue").value : "";
+  const note = borrow ? $("fNote").value.trim() : "";
+  const proj = borrow ? $("fProj").value.trim() : "";
+  const dest = borrow ? $("fDest").value.trim() : "";
+  if (borrow){ try { localStorage.setItem("trd-project", proj); localStorage.setItem("trd-dest", dest); } catch(e){} }
+
+  $("dSubmit").disabled = true;
+  $("dSubmit").textContent = "Saving…";
+  try {
+    if (borrow){
+      await api("/api/borrow", { method: "POST", body: JSON.stringify({
+        itemId: it.id, itemName: it.Name, borrower: name, project: proj, dest: dest, due: due, note: note
+      })});
+      records.unshift({ url: "pending-" + Date.now(), item: it.url, borrower: name,
+        status: "Borrowed", bon: todayISO(), due: due || null, ron: null, note: note || null,
+        project: proj || null, dest: dest || null });
+    } else {
+      const rec = openMap.get(it.url);
+      if (!rec) throw new Error("No open borrow record.");
+      const finalBorrower = rec.borrower && rec.borrower !== name ? rec.borrower + " (returned by " + name + ")" : name;
+      await api("/api/return", { method: "POST", body: JSON.stringify({ recordId: rec.id, borrower: finalBorrower })});
+      const r = records.find(x => x.url === rec.url);
+      if (r){ r.status = "Returned"; r.ron = todayISO(); }
+    }
+    pendingUrl = it.url;
+    $("dlg").close();
+    render();
+    load();
+  } catch(err){
+    const de = $("dErr");
+    de.textContent = "Couldn’t save: " + String(err.message || err);
+    de.style.display = "block";
+    $("dSubmit").disabled = false;
+    $("dSubmit").textContent = borrow ? "Confirm borrow" : "Confirm return";
+  }
+}
+
+function wire(){
+  ["q","fType","fVendor","fStatus"].forEach(id => $(id).addEventListener("input", render));
+  $("list").addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-borrow]"), r = ev.target.closest("button[data-return]");
+    const url = b ? b.dataset.borrow : r ? r.dataset.return : null;
+    if (!url) return;
+    const it = items.find(i => i.url === url);
+    if (it) openDialog(it, b ? "borrow" : "return");
+  });
+  $("dForm").addEventListener("submit", submitDialog);
+  $("dCancel").addEventListener("click", () => $("dlg").close());
+  $("gForm").addEventListener("submit", ev => {
+    ev.preventDefault();
+    try { localStorage.setItem("trd-key", $("gKey").value.trim()); } catch(e){}
+    $("gate").hidden = true;
+    $("status").hidden = false;
+    $("status").className = "empty";
+    $("status").textContent = "Loading inventory…";
+    load();
+  });
+}
+
+async function load(){
+  try {
+    const d = await api("/api/data");
+    items = d.items; records = d.records;
+    haveData = true; pendingUrl = null;
+    $("updatedLine").textContent = "Updated " + new Date().toLocaleTimeString();
+    populateFilters();
+    render();
+    $("gate").hidden = true;
+    $("status").className = "empty";
+  } catch(err){
+    if (err.status === 401){
+      haveData = false; items = []; records = [];
+      $("list").innerHTML = "";
+      $("summary").hidden = true; $("toolbar").hidden = true; $("metaLine").hidden = true;
+      $("status").hidden = true;
+      $("gate").hidden = false;
+      return;
+    }
+    if (!haveData) showBanner("Couldn’t load data from Notion.",
+      String(err.message || err) + " — check the server terminal and your NOTION_TOKEN (see README).");
+  }
+}
+
+wire();
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>
