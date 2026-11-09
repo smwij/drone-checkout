@@ -145,6 +145,7 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 /* Show the camera's full frame (no crop) so the preview matches exactly what gets scanned. */
 .scanbox{position:relative; margin:12px 20px 0; border-radius:16px; overflow:hidden; background:#000; min-height:200px}
 .scanbox video{display:block; width:100%; max-height:56vh; object-fit:contain}
+.scanbox canvas{position:absolute; inset:0; width:100%; height:100%; pointer-events:none}
 .scanbox::after{content:""; position:absolute; inset:12%; border:2px solid rgba(255,255,255,.85); border-radius:14px;
   box-shadow:0 0 0 999px rgba(0,0,0,.28); pointer-events:none}
 #scanDlg .derr{padding:0 20px}
@@ -306,7 +307,7 @@ body.select-mode li.item{cursor:pointer}
     <h2>Scan drones</h2>
     <p class="dmeta">Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.</p>
   </div>
-  <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video></div>
+  <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video><canvas id="scanOverlay"></canvas></div>
   <div class="scancart" id="scanCart" hidden></div>
   <p class="derr" id="scanErr"></p>
   <div class="dbtns">
@@ -742,6 +743,8 @@ async function loadZXing(){
 async function startScan(){
   if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
   const err = $("scanErr"); err.style.display = "none";
+  const ovEl = $("scanOverlay");
+  ovEl.getContext("2d").clearRect(0, 0, ovEl.width, ovEl.height);   // no stale boxes from last session
   updateCartUI();   // keep anything scanned before a cancelled checkout
   $("scanDlg").showModal();
   try {
@@ -778,6 +781,8 @@ async function startScan(){
 
   // Several labels can be in frame at once (uncut sheets, labels side by side):
   // decode them all and take the one nearest the center of the guide box.
+  const withCenter = (text, corners) => ({ text, corners,
+    cx: corners.reduce((a, p) => a + p.x, 0) / 4, cy: corners.reduce((a, p) => a + p.y, 0) / 4 });
   const nearestCenter = (codes, w, h) => {
     let best = null, bd = Infinity;
     for (const c of codes){
@@ -787,34 +792,64 @@ async function startScan(){
     return best && best.text;
   };
 
+  // Live bounding boxes: green on the code that will scan, faint on the rest.
+  const ov = $("scanOverlay"), og = ov.getContext("2d");
+  let lastSeen = 0;
+  const drawBoxes = (codes, bestText, dw, dh) => {
+    const now = Date.now();
+    if (codes.length) lastSeen = now;
+    const cw = ov.clientWidth, chh = ov.clientHeight;
+    if (ov.width !== cw) ov.width = cw;
+    if (ov.height !== chh) ov.height = chh;
+    if (!codes.length){
+      if (now - lastSeen > 350) og.clearRect(0, 0, cw, chh);   // short persistence, less flicker
+      return;
+    }
+    og.clearRect(0, 0, cw, chh);
+    // map detection coords onto the letterboxed (object-fit:contain) video area
+    const vr = video.getBoundingClientRect(), br = ov.getBoundingClientRect();
+    const s = Math.min(vr.width / dw, vr.height / dh);
+    const dx = vr.left - br.left + (vr.width - dw * s) / 2;
+    const dy = vr.top - br.top + (vr.height - dh * s) / 2;
+    for (const c of codes){
+      og.beginPath();
+      c.corners.forEach((p, i) => i ? og.lineTo(p.x * s + dx, p.y * s + dy) : og.moveTo(p.x * s + dx, p.y * s + dy));
+      og.closePath();
+      const isBest = c.text === bestText;
+      og.lineWidth = isBest ? 4 : 2;
+      og.strokeStyle = isBest ? "#30d158" : "rgba(255,255,255,.55)";
+      if (isBest){ og.fillStyle = "rgba(48,209,88,.16)"; og.fill(); }
+      og.stroke();
+    }
+  };
+
   const tick = async () => {
     if (!scanStream) return;
     if (video.readyState >= 2 && video.videoWidth){
-      let code = null;
+      let codes = [], dw = video.videoWidth, dh = video.videoHeight;
       if (detector){
         try {
           const found = await detector.detect(video);
-          code = nearestCenter(found.map(f => ({ text: f.rawValue,
-            cx: f.boundingBox.x + f.boundingBox.width / 2, cy: f.boundingBox.y + f.boundingBox.height / 2 })),
-            video.videoWidth, video.videoHeight);
+          codes = found.map(f => withCenter(f.rawValue, f.cornerPoints));
         } catch(e){}
       } else if (zx){
-        const w = canvas.width = video.videoWidth, h = canvas.height = video.videoHeight;
+        const w = canvas.width = dw, h = canvas.height = dh;
         cx.drawImage(video, 0, 0);   // full resolution — zxing is fast enough (~4 ms) and small codes need it
         try {
           const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h), { formats: ["QRCode"], maxNumberOfSymbols: 8, tryHarder: true });
-          code = nearestCenter(r.filter(x => x.isValid).map(x => {
-            const p = x.position;
-            return { text: x.text, cx: (p.topLeft.x + p.bottomRight.x) / 2, cy: (p.topLeft.y + p.bottomRight.y) / 2 };
-          }), w, h);
+          codes = r.filter(x => x.isValid).map(x => withCenter(x.text,
+            [x.position.topLeft, x.position.topRight, x.position.bottomRight, x.position.bottomLeft]));
         } catch(e){}
       } else {
-        const w = canvas.width = Math.min(640, video.videoWidth);
-        const h = canvas.height = Math.round(video.videoHeight * w / video.videoWidth);
-        cx.drawImage(video, 0, 0, w, h);
-        const r = jsQR(cx.getImageData(0, 0, w, h).data, w, h);
-        code = r && r.data;
+        dw = canvas.width = Math.min(640, video.videoWidth);
+        dh = canvas.height = Math.round(video.videoHeight * dw / video.videoWidth);
+        cx.drawImage(video, 0, 0, dw, dh);
+        const r = jsQR(cx.getImageData(0, 0, dw, dh).data, dw, dh);
+        if (r) codes = [withCenter(r.data,
+          [r.location.topLeftCorner, r.location.topRightCorner, r.location.bottomRightCorner, r.location.bottomLeftCorner])];
       }
+      const code = nearestCenter(codes, dw, dh);
+      drawBoxes(codes, code, dw, dh);
       if (code){
         const now = Date.now();
         if (code !== lastScan.code || now - lastScan.t > 2500){   // don't re-fire on the same label every frame
