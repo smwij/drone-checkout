@@ -29,6 +29,25 @@ async function notion(method, pathname, body) {
   return data;
 }
 
+// Upload a data-URL image via Notion's File Upload API; returns the upload id.
+async function notionUpload(dataUrl, filename) {
+  const m = /^data:(image\/[\w.+-]+);base64,(.+)$/.exec(dataUrl || "");
+  if (!m) throw new Error("photo must be a base64 image data URL");
+  const type = m[1], buf = Buffer.from(m[2], "base64");
+  if (buf.length > 8 * 1024 * 1024) throw new Error("photo too large (max 8 MB)");
+  const up = await notion("POST", "/file_uploads", { mode: "single_part", filename: filename, content_type: type });
+  const fd = new FormData();
+  fd.append("file", new Blob([buf], { type: type }), filename);
+  const res = await fetch(NOTION + "/file_uploads/" + up.id + "/send", {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + TOKEN, "Notion-Version": "2022-06-28" },
+    body: fd
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.message || ("Notion upload " + res.status));
+  return up.id;
+}
+
 async function queryAll(dbId) {
   const pages = [];
   let cursor;
@@ -50,9 +69,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 function mapItem(pg) {
   const p = pg.properties;
+  const cover = pg.cover;
   return {
     id: pg.id, url: appUrl(pg.id), Name: text(p["Name"]), serial: text(p["Serial number"]),
-    vendor: sel(p["Drone Vendor"]), type: sel(p["Type"]), location: sel(p["Location"])
+    vendor: sel(p["Drone Vendor"]), type: sel(p["Type"]), location: sel(p["Location"]),
+    photo: cover ? ((cover.file && cover.file.url) || (cover.external && cover.external.url) || null) : null
   };
 }
 
@@ -100,7 +121,13 @@ async function handleApi(req, body) {
     if (body.vendor) props["Drone Vendor"] = { select: { name: body.vendor } };
     if (body.type) props["Type"] = { select: { name: body.type } };
     if (body.location) props["Location"] = { select: { name: body.location } };
-    const pg = await notion("POST", "/pages", { parent: { database_id: STOCK_DB }, properties: props });
+    let cover;
+    if (body.photo) {
+      const fid = await notionUpload(body.photo, (body.name.replace(/[^\w.-]+/g, "_") || "drone") + ".jpg");
+      cover = { type: "file_upload", file_upload: { id: fid } };
+    }
+    const pg = await notion("POST", "/pages",
+      Object.assign({ parent: { database_id: STOCK_DB }, properties: props }, cover ? { cover: cover } : {}));
     return { ok: true, id: pg.id, url: appUrl(pg.id) };
   }
   if (req.method === "POST" && req.url === "/api/return") {

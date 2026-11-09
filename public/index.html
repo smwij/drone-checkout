@@ -89,7 +89,12 @@ ul.items{list-style:none; margin:0; padding:0; background:var(--panel); border-r
 li.item{padding:13px 16px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:3px 14px; align-items:center}
 li.item + li.item{border-top:.5px solid var(--line)}
 li.item.overdue{background:var(--bad-tint)}
-.iname{font-weight:600; font-size:16px; min-width:0; overflow-wrap:anywhere}
+.iname{font-weight:600; font-size:16px; min-width:0; overflow-wrap:anywhere; display:flex; align-items:center; gap:9px}
+.thumb{width:42px; height:42px; object-fit:cover; border-radius:9px; flex:none; border:1px solid var(--glass-line)}
+#rPreview{max-width:120px; max-height:120px; object-fit:cover; border-radius:12px; align-self:center; border:1px solid var(--glass-line)}
+.serialrow{display:flex; gap:8px}
+.serialrow input{flex:1; min-width:0}
+.serialrow button{height:42px; border-radius:11px; min-width:52px; padding:0}
 .iname a{color:inherit; text-decoration:none}
 .iname a:active{opacity:.5}
 .imeta{grid-column:1; color:var(--muted); font-size:13px; display:flex; flex-wrap:wrap; gap:6px 10px; align-items:center; min-width:0}
@@ -306,8 +311,8 @@ body.select-mode li.item{cursor:pointer}
 
 <dialog id="scanDlg">
   <div class="dhead">
-    <h2>Scan drones</h2>
-    <p class="dmeta">Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.</p>
+    <h2 id="scanTitle">Scan drones</h2>
+    <p class="dmeta" id="scanHint">Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.</p>
   </div>
   <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video><canvas id="scanOverlay"></canvas></div>
   <div class="scancart" id="scanCart" hidden></div>
@@ -328,7 +333,12 @@ body.select-mode li.item{cursor:pointer}
       <input id="rName" required maxlength="100" autocomplete="off" placeholder="e.g. DJI Mini 5 Pro">
     </label>
     <label>Serial number
-      <input id="rSerial" maxlength="60" autocomplete="off">
+      <div class="serialrow">
+        <input id="rSerial" maxlength="60" autocomplete="off">
+        <button type="button" class="act" id="rScan" title="Scan the serial sticker's QR or barcode">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M3 12h18"/></svg>
+        </button>
+      </div>
     </label>
     <label>Vendor
       <input id="rVendor" list="vendorList" maxlength="40" autocomplete="off">
@@ -336,9 +346,10 @@ body.select-mode li.item{cursor:pointer}
     <label>Type
       <input id="rType" list="typeList" maxlength="40" autocomplete="off">
     </label>
-    <label>Location
-      <input id="rLoc" list="locList" maxlength="40" autocomplete="off">
+    <label>Photo (optional)
+      <input id="rPhoto" type="file" accept="image/*">
     </label>
+    <img id="rPreview" alt="" hidden>
     <p class="derr" id="rErr"></p>
     <div class="dbtns">
       <button type="button" class="act secondary" id="rCancel">Cancel</button>
@@ -348,7 +359,6 @@ body.select-mode li.item{cursor:pointer}
 </dialog>
 <datalist id="vendorList"></datalist>
 <datalist id="typeList"></datalist>
-<datalist id="locList"></datalist>
 
 <div id="selbar" hidden>
   <button class="act secondary" id="selAllBorrowed" type="button">All borrowed</button>
@@ -483,7 +493,8 @@ function render(){
         bf("Note", rec.note) +
         "</div>" : "";
     return '<li class="item' + (od ? " overdue" : "") + (pend ? " pending" : "") + '" data-url="' + esc(it.url) + '">' +
-      '<div class="iname"><a href="' + esc(it.url) + '" target="_blank" rel="noopener" title="Open in Notion">' + esc(it.Name || "(unnamed)") + "</a></div>" +
+      '<div class="iname">' + (it.photo ? '<img class="thumb" src="' + esc(it.photo) + '" alt="" loading="lazy">' : "") +
+      '<a href="' + esc(it.url) + '" target="_blank" rel="noopener" title="Open in Notion">' + esc(it.Name || "(unnamed)") + "</a></div>" +
       '<div class="imeta">' +
         (it.type ? '<span class="tag">' + esc(it.type) + "</span>" : "") +
         (it.vendor ? '<span class="tag">' + esc(it.vendor) + "</span>" : "") +
@@ -763,7 +774,8 @@ function loadScript(src){
 }
 
 let scanStream = null, scanTick = 0, lastScan = { code: "", t: 0 };
-let zxReader = null;   // cached zxing-wasm module
+let scanCapture = null;   // when set, the scanner feeds the first code to this callback (e.g. serial field)
+let zxReader = null;      // cached zxing-wasm module
 
 // Decoder preference: native BarcodeDetector → zxing-wasm (fast WASM, reads
 // small/far codes jsQR can't) → jsQR as a last resort if the CDN is down.
@@ -774,12 +786,19 @@ async function loadZXing(){
   return (zxReader = m);
 }
 
-async function startScan(){
-  if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
+async function startScan(capture){
+  scanCapture = typeof capture === "function" ? capture : null;
+  if (!haveData && !scanCapture){ toast("Inventory hasn't loaded yet."); return; }
   const err = $("scanErr"); err.style.display = "none";
   const ovEl = $("scanOverlay");
   ovEl.getContext("2d").clearRect(0, 0, ovEl.width, ovEl.height);   // no stale boxes from last session
-  updateCartUI();   // keep anything scanned before a cancelled checkout
+  $("scanTitle").textContent = scanCapture ? "Scan serial" : "Scan drones";
+  $("scanHint").textContent = scanCapture
+    ? "Point at the serial sticker — QR code or barcode."
+    : "Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.";
+  $("scanDone").hidden = !!scanCapture;
+  if (scanCapture) $("scanCart").hidden = true;
+  else updateCartUI();   // keep anything scanned before a cancelled checkout
   $("scanDlg").showModal();
   try {
     scanStream = await navigator.mediaDevices.getUserMedia({
@@ -793,11 +812,15 @@ async function startScan(){
   video.srcObject = scanStream;
   await video.play().catch(() => {});
 
+  // Serial stickers carry QR, DataMatrix or 1D barcodes — widen formats in capture mode.
+  const WIDE_NATIVE = ["qr_code", "data_matrix", "code_128", "code_39", "ean_13", "itf"];
+  const WIDE_ZXING = ["QRCode", "DataMatrix", "Code128", "Code39", "EAN-13", "ITF"];
   let detector = null;
   if (window.BarcodeDetector){
     try {
-      if ((await BarcodeDetector.getSupportedFormats()).includes("qr_code"))
-        detector = new BarcodeDetector({ formats: ["qr_code"] });
+      const sup = await BarcodeDetector.getSupportedFormats();
+      const want = (scanCapture ? WIDE_NATIVE : ["qr_code"]).filter(f => sup.includes(f));
+      if (want.includes("qr_code")) detector = new BarcodeDetector({ formats: want });
     } catch(e){}
   }
   let zx = null;
@@ -870,7 +893,8 @@ async function startScan(){
         const w = canvas.width = dw, h = canvas.height = dh;
         cx.drawImage(video, 0, 0);   // full resolution — zxing is fast enough (~4 ms) and small codes need it
         try {
-          const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h), { formats: ["QRCode"], maxNumberOfSymbols: 8, tryHarder: true });
+          const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h),
+            { formats: scanCapture ? WIDE_ZXING : ["QRCode"], maxNumberOfSymbols: 8, tryHarder: true });
           codes = r.filter(x => x.isValid).map(x => withCenter(x.text,
             [x.position.topLeft, x.position.topRight, x.position.bottomRight, x.position.bottomLeft]));
         } catch(e){}
@@ -884,7 +908,15 @@ async function startScan(){
       }
       const code = nearestCenter(codes, dw, dh);
       drawBoxes(codes, code, dw, dh);
-      if (code){
+      if (scanCapture){
+        if (code){
+          const cb = scanCapture;
+          beep();
+          stopScan();
+          cb(code);
+          return;
+        }
+      } else if (code){
         const now = Date.now();
         if (code !== lastScan.code || now - lastScan.t > 2500){   // don't re-fire on the same label every frame
           lastScan = { code, t: now };
@@ -901,6 +933,7 @@ async function startScan(){
 
 function stopScan(){
   clearTimeout(scanTick); scanTick = 0;
+  scanCapture = null;
   if (scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
   $("scanVideo").srcObject = null;
   if ($("scanDlg").open) $("scanDlg").close();
@@ -941,6 +974,40 @@ function hideLabels(){
 }
 
 /* ---- register a new drone ---- */
+let regPhoto = "";   // resized JPEG data URL, ready to upload
+
+function loadImageFile(file){
+  return new Promise((res, rej) => {
+    const u = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error("couldn't read that image"));
+    im.src = u;
+  });
+}
+
+async function pickPhoto(){
+  const file = $("rPhoto").files && $("rPhoto").files[0];
+  const pv = $("rPreview");
+  regPhoto = "";
+  pv.hidden = true;
+  if (!file) return;
+  try {
+    const im = await loadImageFile(file);
+    const s = Math.min(1, 1600 / Math.max(im.width, im.height));   // keep uploads small
+    const c = document.createElement("canvas");
+    c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+    c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+    regPhoto = c.toDataURL("image/jpeg", 0.82);
+    pv.src = regPhoto;
+    pv.hidden = false;
+  } catch(e){
+    const re = $("rErr");
+    re.textContent = "Photo problem: " + String(e.message || e);
+    re.style.display = "block";
+  }
+}
+
 function openRegister(){
   if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
   const fill = (id, vals) => {
@@ -949,8 +1016,9 @@ function openRegister(){
   };
   fill("vendorList", items.map(i => i.vendor));
   fill("typeList", items.map(i => i.type));
-  fill("locList", items.map(i => i.location));
   $("regForm").reset();
+  regPhoto = "";
+  $("rPreview").hidden = true;
   const re = $("rErr"); re.style.display = "none"; delete re.dataset.confirmDup;
   $("rSubmit").disabled = false;
   $("rSubmit").textContent = "Register";
@@ -975,7 +1043,7 @@ async function submitRegister(ev){
   try {
     await api("/api/register", { method: "POST", body: JSON.stringify({
       name: name, serial: serial,
-      vendor: $("rVendor").value.trim(), type: $("rType").value.trim(), location: $("rLoc").value.trim()
+      vendor: $("rVendor").value.trim(), type: $("rType").value.trim(), photo: regPhoto || undefined
     })});
     $("regDlg").close();
     toast("Registered " + name + " ✓ — its QR is on the label sheet");
@@ -1018,6 +1086,8 @@ function wire(){
   $("regBtn").addEventListener("click", openRegister);
   $("regForm").addEventListener("submit", submitRegister);
   $("rCancel").addEventListener("click", () => $("regDlg").close());
+  $("rPhoto").addEventListener("change", pickPhoto);
+  $("rScan").addEventListener("click", () => startScan(code => { $("rSerial").value = code; }));
   $("selectBtn").addEventListener("click", toggleSelectMode);
   $("selCheckout").addEventListener("click", openCartDialog);
   $("selAllBorrowed").addEventListener("click", () => {
