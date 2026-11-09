@@ -140,6 +140,8 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 
 /* ---- QR scanner ---- */
 #scanBtn,#selectBtn{height:38px; border-radius:11px; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px}
+.tbreak{flex-basis:100%; height:0}
+#selectBtn{margin-left:auto; height:34px}
 .scanbox{position:relative; margin:12px 20px 0; border-radius:16px; overflow:hidden; background:#000; aspect-ratio:1}
 .scanbox video{width:100%; height:100%; object-fit:cover; display:block}
 .scanbox::after{content:""; position:absolute; inset:16%; border:2px solid rgba(255,255,255,.85); border-radius:14px;
@@ -229,7 +231,6 @@ body.select-mode li.item{cursor:pointer}
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M3 12h18"/></svg>
       Scan
     </button>
-    <button class="act secondary" id="selectBtn" type="button" title="Select several items, then check them out together">Select</button>
     <input type="search" id="q" placeholder="Search name or serial…" aria-label="Search items">
     <select id="fType" aria-label="Filter by type"><option value="">All types</option></select>
     <select id="fVendor" aria-label="Filter by vendor"><option value="">All vendors</option></select>
@@ -240,6 +241,8 @@ body.select-mode li.item{cursor:pointer}
       <option value="Overdue">Overdue</option>
       <option value="Unavailable">Unavailable</option>
     </select>
+    <span class="tbreak" aria-hidden="true"></span>
+    <button class="act secondary" id="selectBtn" type="button" title="Select several items, then check them out together">Select</button>
   </div>
 
   <p class="meta-line" id="metaLine" hidden><span id="countLine"></span><span id="updatedLine"></span></p>
