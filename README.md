@@ -9,6 +9,23 @@ Plain Node.js (18+), no npm packages. Teammates just open the URL — they
 don't need Notion or Claude accounts; the "Your name" field in the borrow
 form identifies the borrower.
 
+## QR checkout
+
+Supermarket-style scanning:
+
+1. Open **QR labels** (top nav) on the deployed site → *Print labels* →
+   cut out and stick one on each drone / case. Each label encodes
+   `https://<your-app>/?scan=<item-id>`, so print from the real URL, not
+   localhost.
+2. To check out or return: tap **Scan** in the app (uses the camera;
+   needs HTTPS, which Render provides) **or** just point any phone
+   camera app at the label — either way the item's borrow or return
+   form opens immediately. Scanning also accepts a typed serial number.
+
+QR decoding uses the browser's native `BarcodeDetector` where available,
+falling back to jsQR from a CDN; label rendering uses qrcode.js from a
+CDN (both loaded only when used).
+
 ## 1. Notion setup (one time)
 
 1. Go to https://www.notion.so/profile/integrations → *New integration*

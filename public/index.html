@@ -138,6 +138,39 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 .dbtns button.act{height:46px; border-radius:13px; font-size:16px; min-width:0; width:100%}
 .derr{color:var(--bad-text); font-size:13px; margin:0; display:none; text-align:center}
 
+/* ---- QR scanner ---- */
+#scanBtn{height:38px; border-radius:11px; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px}
+.scanbox{position:relative; margin:12px 20px 0; border-radius:16px; overflow:hidden; background:#000; aspect-ratio:1}
+.scanbox video{width:100%; height:100%; object-fit:cover; display:block}
+.scanbox::after{content:""; position:absolute; inset:16%; border:2px solid rgba(255,255,255,.85); border-radius:14px;
+  box-shadow:0 0 0 999px rgba(0,0,0,.28); pointer-events:none}
+#scanDlg .derr{padding:0 20px}
+#scanDlg .dbtns{padding:12px 20px 20px; margin-top:0}
+
+/* ---- QR label sheet ---- */
+.labels-actions{display:flex; gap:8px; margin-block:0 10px}
+.labels-note{margin:0 0 14px; padding-inline:2px}
+.labelgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:10px}
+.label{background:#fff; color:#000; border:1.5px dashed #9a9aa0; border-radius:12px; padding:12px 8px 10px;
+  display:flex; flex-direction:column; align-items:center; text-align:center; break-inside:avoid}
+.label .lqr img,.label .lqr canvas{width:96px; height:96px; display:block}
+.label .ln{font-weight:700; font-size:13px; margin-top:7px; line-height:1.25; overflow-wrap:anywhere}
+.label .ls{font-size:11px; color:#4b4b50; font-variant-numeric:tabular-nums; margin-top:2px; overflow-wrap:anywhere}
+
+/* ---- toast ---- */
+#toast{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(20px + env(safe-area-inset-bottom,0px));
+  background:rgba(30,30,36,.88); color:#fff; padding:10px 18px; border-radius:999px; font-size:14px; max-width:86vw;
+  z-index:50; backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); transition:opacity .3s; opacity:0; pointer-events:none}
+#toast.show{opacity:1}
+
+@media print{
+  body{background:#fff!important; padding:0}
+  body::before,#toast{display:none!important}
+  body.labels-mode .navrow, body.labels-mode header.top, body.labels-mode footer,
+  body.labels-mode .labels-actions, body.labels-mode .labels-note{display:none!important}
+  .label{border-color:#000}
+}
+
 @media (max-width:640px){
   .summary{grid-template-columns:repeat(2,1fr)}
 }
@@ -156,6 +189,7 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 
 <div class="wrap">
   <nav class="navrow">
+    <a href="#" id="labelsLink">QR labels</a>
     <a href="https://app.notion.com/p/412ba2f496588187ad64f6d70c15cff9" target="_blank" rel="noopener">Stock database</a>
     <a href="https://app.notion.com/p/1902f54054e04a168ec5980f78b112f0" target="_blank" rel="noopener">Borrow log</a>
   </nav>
@@ -172,6 +206,10 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
   </div>
 
   <div class="toolbar" id="toolbar" hidden>
+    <button class="act" id="scanBtn" type="button" title="Scan a drone's QR label">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M3 12h18"/></svg>
+      Scan
+    </button>
     <input type="search" id="q" placeholder="Search name or serial…" aria-label="Search items">
     <select id="fType" aria-label="Filter by type"><option value="">All types</option></select>
     <select id="fVendor" aria-label="Filter by vendor"><option value="">All vendors</option></select>
@@ -196,6 +234,16 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 
   <div id="status" class="empty">Loading inventory…</div>
   <ul class="items" id="list"></ul>
+
+  <section id="labels" hidden>
+    <div class="labels-actions">
+      <button class="act secondary" id="labelsBack" type="button">‹ Back</button>
+      <button class="act" id="labelsPrint" type="button">Print labels</button>
+    </div>
+    <p class="sub labels-note">Print this sheet, cut out the labels, and stick one on each drone or case.
+      Scanning a label — with the in-app Scan button or any phone camera — opens that item's checkout directly.</p>
+    <div class="labelgrid" id="labelGrid"></div>
+  </section>
 
   <footer>TRD drone team · records live in the Notion Borrow Log · this page never edits the stock database</footer>
 </div>
@@ -228,6 +276,20 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
     </div>
   </form>
 </dialog>
+
+<dialog id="scanDlg">
+  <div class="dhead">
+    <h2>Scan a drone</h2>
+    <p class="dmeta">Point the camera at a QR label. It checks out — or back in — automatically.</p>
+  </div>
+  <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video></div>
+  <p class="derr" id="scanErr"></p>
+  <div class="dbtns">
+    <button type="button" class="act secondary" id="scanCancel">Cancel</button>
+  </div>
+</dialog>
+
+<div id="toast" role="status"></div>
 
 <script>
 "use strict";
@@ -300,6 +362,7 @@ function fmtDate(s){
 function render(){
   if (!haveData) return;
   openMap = openRecords();
+  if (document.body.classList.contains("labels-mode")) return;   // label sheet is on screen
   $("summary").hidden = false;
   $("toolbar").hidden = false;
   $("metaLine").hidden = false;
@@ -433,6 +496,167 @@ async function submitDialog(ev){
   }
 }
 
+/* ---- toast ---- */
+let toastTimer = 0;
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3500);
+}
+
+/* ---- QR scanning ----
+   Labels encode  <origin>/?scan=<item id, no dashes> , so any phone camera app
+   opens this page with the item preselected; the in-app scanner parses the same
+   URL (or a bare id / serial number). */
+const normCode = s => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const qrPayload = it => location.origin + "/?scan=" + it.id.replace(/-/g, "");
+let pendingScan = new URLSearchParams(location.search).get("scan") || "";
+if (pendingScan) history.replaceState(null, "", location.pathname);
+
+function findByCode(text){
+  let code = String(text || "").trim();
+  try { code = new URL(code).searchParams.get("scan") || code; } catch(e){}
+  const n = normCode(code);
+  if (!n) return null;
+  return items.find(i => normCode(i.id) === n) ||
+         items.find(i => i.serial && normCode(i.serial) === n) || null;
+}
+
+function beep(){
+  try {
+    const C = window.AudioContext || window.webkitAudioContext;
+    const ctx = new C(), o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 1245; g.gain.value = .12;
+    o.start(); o.stop(ctx.currentTime + .12);
+    setTimeout(() => ctx.close(), 400);
+  } catch(e){}
+  if (navigator.vibrate) try { navigator.vibrate(60); } catch(e){}
+}
+
+function notify(msg){
+  if ($("scanDlg").open){ const el = $("scanErr"); el.textContent = msg; el.style.display = "block"; }
+  else toast(msg);
+}
+
+// Scanned a known item: borrowed → return flow, available → borrow flow.
+function actOnItem(it){
+  const s = statusOf(it);
+  if (s === "Unavailable"){ notify((it.Name || "This item") + " is marked unavailable."); return false; }
+  beep();
+  stopScan();
+  openDialog(it, s === "Borrowed" ? "return" : "borrow");
+  return true;
+}
+
+function loadScript(src){
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = res;
+    s.onerror = () => rej(new Error("Couldn't load " + src.split("/").pop() + " — check your connection."));
+    document.head.appendChild(s);
+  });
+}
+
+let scanStream = null, scanTick = 0, lastScan = { code: "", t: 0 };
+
+async function startScan(){
+  if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
+  const err = $("scanErr"); err.style.display = "none";
+  $("scanDlg").showModal();
+  try {
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+  } catch(e){
+    notify("Camera unavailable (" + (e.name || e.message) + "). You can also scan a label with your phone's own camera app — it opens this page.");
+    return;
+  }
+  if (!$("scanDlg").open) return stopScan();   // cancelled while permission prompt was up
+  const video = $("scanVideo");
+  video.srcObject = scanStream;
+  await video.play().catch(() => {});
+
+  let detector = null;
+  if (window.BarcodeDetector){
+    try {
+      if ((await BarcodeDetector.getSupportedFormats()).includes("qr_code"))
+        detector = new BarcodeDetector({ formats: ["qr_code"] });
+    } catch(e){}
+  }
+  if (!detector && !window.jsQR){
+    try { await loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"); }
+    catch(e){ notify(e.message); return; }
+  }
+  const canvas = document.createElement("canvas");
+  const cx = canvas.getContext("2d", { willReadFrequently: true });
+
+  const tick = async () => {
+    if (!scanStream) return;
+    if (video.readyState >= 2 && video.videoWidth){
+      let code = null;
+      if (detector){
+        try { const found = await detector.detect(video); code = found[0] && found[0].rawValue; } catch(e){}
+      } else {
+        const w = canvas.width = Math.min(640, video.videoWidth);
+        const h = canvas.height = Math.round(video.videoHeight * w / video.videoWidth);
+        cx.drawImage(video, 0, 0, w, h);
+        const r = jsQR(cx.getImageData(0, 0, w, h).data, w, h);
+        code = r && r.data;
+      }
+      if (code){
+        const now = Date.now();
+        if (code !== lastScan.code || now - lastScan.t > 2500){   // don't re-fire on the same label every frame
+          lastScan = { code, t: now };
+          const it = findByCode(code);
+          if (it){ if (actOnItem(it)) return; }
+          else notify("No inventory item matches this code.");
+        }
+      }
+    }
+    scanTick = setTimeout(tick, 120);
+  };
+  tick();
+}
+
+function stopScan(){
+  clearTimeout(scanTick); scanTick = 0;
+  if (scanStream){ scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+  $("scanVideo").srcObject = null;
+  if ($("scanDlg").open) $("scanDlg").close();
+}
+
+/* ---- printable QR label sheet ---- */
+async function showLabels(){
+  if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
+  if (!window.QRCode){
+    try { await loadScript("https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"); }
+    catch(e){ toast(e.message); return; }
+  }
+  const grid = $("labelGrid");
+  grid.innerHTML = "";
+  items.forEach(it => {
+    const d = document.createElement("div"); d.className = "label";
+    const q = document.createElement("div"); q.className = "lqr";
+    new QRCode(q, { text: qrPayload(it), width: 96, height: 96, correctLevel: QRCode.CorrectLevel.M });
+    d.appendChild(q);
+    const n = document.createElement("div"); n.className = "ln"; n.textContent = it.Name || "(unnamed)";
+    d.appendChild(n);
+    if (it.serial){ const s = document.createElement("div"); s.className = "ls"; s.textContent = "SN " + it.serial; d.appendChild(s); }
+    grid.appendChild(d);
+  });
+  document.body.classList.add("labels-mode");
+  ["summary","toolbar","metaLine","status","list"].forEach(id => $(id).hidden = true);
+  $("labels").hidden = false;
+  window.scrollTo(0, 0);
+}
+
+function hideLabels(){
+  document.body.classList.remove("labels-mode");
+  $("labels").hidden = true;
+  render();
+}
+
 function wire(){
   ["q","fType","fVendor","fStatus"].forEach(id => $(id).addEventListener("input", render));
   $("list").addEventListener("click", ev => {
@@ -444,6 +668,12 @@ function wire(){
   });
   $("dForm").addEventListener("submit", submitDialog);
   $("dCancel").addEventListener("click", () => $("dlg").close());
+  $("scanBtn").addEventListener("click", startScan);
+  $("scanCancel").addEventListener("click", stopScan);
+  $("scanDlg").addEventListener("close", stopScan);
+  $("labelsLink").addEventListener("click", ev => { ev.preventDefault(); showLabels(); });
+  $("labelsBack").addEventListener("click", hideLabels);
+  $("labelsPrint").addEventListener("click", () => window.print());
   $("gForm").addEventListener("submit", ev => {
     ev.preventDefault();
     try { localStorage.setItem("trd-key", $("gKey").value.trim()); } catch(e){}
@@ -465,6 +695,12 @@ async function load(){
     render();
     $("gate").hidden = true;
     $("status").className = "empty";
+    if (pendingScan){   // opened via a scanned label URL (?scan=…)
+      const it = findByCode(pendingScan);
+      pendingScan = "";
+      if (it) actOnItem(it);
+      else toast("No inventory item matches the scanned code.");
+    }
   } catch(err){
     if (err.status === 401){
       haveData = false; items = []; records = [];
