@@ -146,6 +146,14 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
   box-shadow:0 0 0 999px rgba(0,0,0,.28); pointer-events:none}
 #scanDlg .derr{padding:0 20px}
 #scanDlg .dbtns{padding:12px 20px 20px; margin-top:0}
+.scancart{display:flex; flex-wrap:wrap; gap:6px; padding:12px 20px 0}
+.scancart .citem{display:inline-flex; align-items:center; gap:7px; background:var(--accent-tint); color:var(--accent);
+  font-size:13px; font-weight:600; border-radius:999px; padding:4px 7px 4px 12px; max-width:100%}
+.scancart .citem em{font-style:normal; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.scancart .citem.ret{background:var(--warn-tint); color:var(--warn-text)}
+.scancart .citem button{all:unset; cursor:pointer; flex:none; width:19px; height:19px; line-height:19px; text-align:center;
+  border-radius:50%; background:rgba(60,60,67,.14); font-size:11px}
+.scancart .citem button:active{opacity:.5}
 
 /* ---- QR label sheet ---- */
 .labels-actions{display:flex; gap:8px; margin-block:0 10px}
@@ -279,13 +287,15 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 
 <dialog id="scanDlg">
   <div class="dhead">
-    <h2>Scan a drone</h2>
-    <p class="dmeta">Point the camera at a QR label. It checks out — or back in — automatically.</p>
+    <h2>Scan drones</h2>
+    <p class="dmeta">Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.</p>
   </div>
   <div class="scanbox"><video id="scanVideo" playsinline muted autoplay></video></div>
+  <div class="scancart" id="scanCart" hidden></div>
   <p class="derr" id="scanErr"></p>
   <div class="dbtns">
     <button type="button" class="act secondary" id="scanCancel">Cancel</button>
+    <button type="button" class="act" id="scanDone" disabled>Check out</button>
   </div>
 </dialog>
 
@@ -454,11 +464,12 @@ function openDialog(it, mode){
 
 async function submitDialog(ev){
   ev.preventDefault();
-  if (!dlgItem) return;
-  const it = dlgItem, borrow = dlgMode === "borrow";
+  if (!dlgItem && dlgMode !== "cart") return;
   const name = $("fName").value.trim();
   if (!name) return;
   try { localStorage.setItem("trd-borrower", name); } catch(e){}
+  if (dlgMode === "cart") return submitCart(name);
+  const it = dlgItem, borrow = dlgMode === "borrow";
   const due = borrow ? $("fDue").value : "";
   const note = borrow ? $("fNote").value.trim() : "";
   const proj = borrow ? $("fProj").value.trim() : "";
@@ -540,6 +551,106 @@ function notify(msg){
   else toast(msg);
 }
 
+/* ---- scan cart: scan several, check out once ---- */
+let cart = [];
+
+function updateCartUI(){
+  const box = $("scanCart");
+  box.hidden = !cart.length;
+  box.innerHTML = cart.map((c, i) => {
+    const ret = statusOf(c) === "Borrowed";
+    return '<span class="citem' + (ret ? " ret" : "") + '"><em>' + esc(c.Name || "(unnamed)") + (ret ? " ↩" : "") +
+      '</em><button type="button" data-rm="' + i + '" aria-label="Remove ' + esc(c.Name || "item") + '">✕</button></span>';
+  }).join("");
+  const nR = cart.filter(c => statusOf(c) === "Borrowed").length, nB = cart.length - nR;
+  const btn = $("scanDone");
+  btn.disabled = !cart.length;
+  btn.textContent = !cart.length ? "Check out"
+    : "Check out: " + (nB ? "borrow " + nB : "") + (nB && nR ? " · " : "") + (nR ? "return " + nR : "");
+}
+
+function addToCart(it){
+  const s = statusOf(it);
+  if (s === "Unavailable"){ notify((it.Name || "This item") + " is marked unavailable."); return; }
+  if (cart.some(c => c.id === it.id)){ notify((it.Name || "Item") + " is already in the cart."); return; }
+  cart.push(it);
+  beep();
+  $("scanErr").style.display = "none";
+  updateCartUI();
+}
+
+function openCartDialog(){
+  if (!cart.length) return;
+  dlgItem = null; dlgMode = "cart";
+  const names = st => cart.filter(c => (statusOf(c) === "Borrowed") === st).map(c => c.Name || "(unnamed)").join(", ");
+  const returns = names(true), borrows = names(false);
+  $("dTitle").textContent = "Checkout";
+  $("dMeta").textContent = (borrows ? "Borrow: " + borrows : "") +
+    (borrows && returns ? " — " : "") + (returns ? "Return: " + returns : "");
+  const b = !!borrows;
+  $("lProj").hidden = !b; $("lDest").hidden = !b; $("lDue").hidden = !b; $("lNote").hidden = !b;
+  $("lName").firstChild.textContent = "Your name ";
+  let saved = "", proj = "", dst = "";
+  try { saved = localStorage.getItem("trd-borrower") || ""; proj = localStorage.getItem("trd-project") || ""; dst = localStorage.getItem("trd-dest") || ""; } catch(e){}
+  $("fName").value = saved;
+  if (b){
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    $("fDue").value = d.toISOString().slice(0,10);
+    $("fNote").value = "";
+    $("fProj").value = proj;
+    $("fDest").value = dst;
+  }
+  $("dErr").style.display = "none";
+  $("dSubmit").textContent = "Confirm " + cart.length + (cart.length === 1 ? " item" : " items");
+  $("dSubmit").disabled = false;
+  $("dlg").showModal();
+}
+
+// One form, N saves: borrows for available items, returns for borrowed ones.
+async function submitCart(name){
+  const anyBorrow = cart.some(c => statusOf(c) !== "Borrowed");
+  const due = anyBorrow ? $("fDue").value : "";
+  const note = anyBorrow ? $("fNote").value.trim() : "";
+  const proj = anyBorrow ? $("fProj").value.trim() : "";
+  const dest = anyBorrow ? $("fDest").value.trim() : "";
+  if (anyBorrow){ try { localStorage.setItem("trd-project", proj); localStorage.setItem("trd-dest", dest); } catch(e){} }
+  $("dSubmit").disabled = true;
+  const total = cart.length;
+  try {
+    while (cart.length){
+      const it = cart[0];
+      $("dSubmit").textContent = "Saving " + (total - cart.length + 1) + "/" + total + "…";
+      if (statusOf(it) === "Borrowed"){
+        const rec = openMap.get(it.url);
+        if (!rec) throw new Error("no open borrow record");
+        const by = rec.borrower && rec.borrower !== name ? rec.borrower + " (returned by " + name + ")" : name;
+        await api("/api/return", { method: "POST", body: JSON.stringify({ recordId: rec.id, borrower: by }) });
+        const r = records.find(x => x.url === rec.url);
+        if (r){ r.status = "Returned"; r.ron = todayISO(); }
+      } else {
+        await api("/api/borrow", { method: "POST", body: JSON.stringify({
+          itemId: it.id, itemName: it.Name, borrower: name, project: proj, dest: dest, due: due, note: note }) });
+        records.unshift({ url: "pending-" + Date.now(), item: it.url, borrower: name,
+          status: "Borrowed", bon: todayISO(), due: due || null, ron: null, note: note || null,
+          project: proj || null, dest: dest || null });
+      }
+      cart.shift();   // only drop it once saved, so a failure keeps the rest for retry
+    }
+    $("dlg").close();
+    toast("Saved " + total + (total === 1 ? " item ✓" : " items ✓"));
+    render();
+    load();
+  } catch(err){
+    const de = $("dErr");
+    de.textContent = "Saved " + (total - cart.length) + " of " + total + ". Couldn’t save " +
+      ((cart[0] && cart[0].Name) || "the next item") + ": " + String(err.message || err);
+    de.style.display = "block";
+    $("dSubmit").disabled = false;
+    $("dSubmit").textContent = "Retry " + cart.length + (cart.length === 1 ? " item" : " items");
+    render();
+  }
+}
+
 // Scanned a known item: borrowed → return flow, available → borrow flow.
 function actOnItem(it){
   const s = statusOf(it);
@@ -565,6 +676,7 @@ let scanStream = null, scanTick = 0, lastScan = { code: "", t: 0 };
 async function startScan(){
   if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
   const err = $("scanErr"); err.style.display = "none";
+  updateCartUI();   // keep anything scanned before a cancelled checkout
   $("scanDlg").showModal();
   try {
     scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
@@ -609,7 +721,7 @@ async function startScan(){
         if (code !== lastScan.code || now - lastScan.t > 2500){   // don't re-fire on the same label every frame
           lastScan = { code, t: now };
           const it = findByCode(code);
-          if (it){ if (actOnItem(it)) return; }
+          if (it) addToCart(it);   // keep scanning — checkout happens once, via the button
           else notify("No inventory item matches this code.");
         }
       }
@@ -672,6 +784,11 @@ function wire(){
   $("scanBtn").addEventListener("click", startScan);
   $("scanCancel").addEventListener("click", stopScan);
   $("scanDlg").addEventListener("close", stopScan);
+  $("scanDone").addEventListener("click", () => { stopScan(); openCartDialog(); });
+  $("scanCart").addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-rm]");
+    if (b){ cart.splice(+b.dataset.rm, 1); updateCartUI(); }
+  });
   $("labelsLink").addEventListener("click", ev => { ev.preventDefault(); showLabels(); });
   $("labelsBack").addEventListener("click", hideLabels);
   $("labelsPrint").addEventListener("click", () => window.print());
