@@ -92,6 +92,17 @@ async function handleApi(req, body) {
     await notion("POST", "/pages", { parent: { database_id: LOG_DB }, properties: props });
     return { ok: true };
   }
+  if (req.method === "POST" && req.url === "/api/register") {
+    // Creates a NEW page in the stock duplicate; never edits existing rows.
+    if (!body.name) throw new Error("name is required");
+    const props = { "Name": { title: [{ text: { content: body.name } }] } };
+    if (body.serial) props["Serial number"] = rich(body.serial);
+    if (body.vendor) props["Drone Vendor"] = { select: { name: body.vendor } };
+    if (body.type) props["Type"] = { select: { name: body.type } };
+    if (body.location) props["Location"] = { select: { name: body.location } };
+    const pg = await notion("POST", "/pages", { parent: { database_id: STOCK_DB }, properties: props });
+    return { ok: true, id: pg.id, url: appUrl(pg.id) };
+  }
   if (req.method === "POST" && req.url === "/api/return") {
     if (!body.recordId || !body.borrower) throw new Error("recordId and borrower are required");
     await notion("PATCH", "/pages/" + body.recordId, { properties: {

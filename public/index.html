@@ -141,7 +141,8 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 /* ---- QR scanner ---- */
 #scanBtn,#selectBtn{height:38px; border-radius:11px; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px}
 .tbreak{flex-basis:100%; height:0}
-#selectBtn{margin-left:auto; height:34px}
+#selectBtn,#regBtn{height:34px}
+#selectBtn{margin-left:auto}
 /* Show the camera's full frame (no crop) so the preview matches exactly what gets scanned. */
 .scanbox{position:relative; margin:12px 20px 0; border-radius:16px; overflow:hidden; background:#000; min-height:200px}
 .scanbox video{display:block; width:100%; max-height:56vh; object-fit:contain}
@@ -244,6 +245,7 @@ body.select-mode li.item{cursor:pointer}
       <option value="Unavailable">Unavailable</option>
     </select>
     <span class="tbreak" aria-hidden="true"></span>
+    <button class="act secondary" id="regBtn" type="button" title="Add a new drone to the inventory">＋ Register</button>
     <button class="act secondary" id="selectBtn" type="button" title="Select several items, then check them out together">Select</button>
   </div>
 
@@ -315,6 +317,38 @@ body.select-mode li.item{cursor:pointer}
     <button type="button" class="act" id="scanDone" disabled>Check out</button>
   </div>
 </dialog>
+
+<dialog id="regDlg">
+  <div class="dhead">
+    <h2>Register drone</h2>
+    <p class="dmeta">Adds a new item to the stock database. Nothing existing is changed.</p>
+  </div>
+  <form id="regForm">
+    <label>Name
+      <input id="rName" required maxlength="100" autocomplete="off" placeholder="e.g. DJI Mini 5 Pro">
+    </label>
+    <label>Serial number
+      <input id="rSerial" maxlength="60" autocomplete="off">
+    </label>
+    <label>Vendor
+      <input id="rVendor" list="vendorList" maxlength="40" autocomplete="off">
+    </label>
+    <label>Type
+      <input id="rType" list="typeList" maxlength="40" autocomplete="off">
+    </label>
+    <label>Location
+      <input id="rLoc" list="locList" maxlength="40" autocomplete="off">
+    </label>
+    <p class="derr" id="rErr"></p>
+    <div class="dbtns">
+      <button type="button" class="act secondary" id="rCancel">Cancel</button>
+      <button type="submit" class="act" id="rSubmit">Register</button>
+    </div>
+  </form>
+</dialog>
+<datalist id="vendorList"></datalist>
+<datalist id="typeList"></datalist>
+<datalist id="locList"></datalist>
 
 <div id="selbar" hidden>
   <button class="act secondary" id="selAllBorrowed" type="button">All borrowed</button>
@@ -906,6 +940,55 @@ function hideLabels(){
   render();
 }
 
+/* ---- register a new drone ---- */
+function openRegister(){
+  if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
+  const fill = (id, vals) => {
+    $(id).innerHTML = [...new Set(vals.filter(Boolean))].sort()
+      .map(v => '<option value="' + esc(v) + '">').join("");
+  };
+  fill("vendorList", items.map(i => i.vendor));
+  fill("typeList", items.map(i => i.type));
+  fill("locList", items.map(i => i.location));
+  $("regForm").reset();
+  const re = $("rErr"); re.style.display = "none"; delete re.dataset.confirmDup;
+  $("rSubmit").disabled = false;
+  $("rSubmit").textContent = "Register";
+  $("regDlg").showModal();
+}
+
+async function submitRegister(ev){
+  ev.preventDefault();
+  const name = $("rName").value.trim();
+  if (!name) return;
+  const serial = $("rSerial").value.trim();
+  const re = $("rErr");
+  const dup = serial && items.find(i => (i.serial || "").toLowerCase() === serial.toLowerCase());
+  if (dup && !re.dataset.confirmDup){
+    re.textContent = "That serial is already on “" + (dup.Name || "an item") + "”. Press Register again to add anyway.";
+    re.style.display = "block";
+    re.dataset.confirmDup = "1";
+    return;
+  }
+  $("rSubmit").disabled = true;
+  $("rSubmit").textContent = "Saving…";
+  try {
+    await api("/api/register", { method: "POST", body: JSON.stringify({
+      name: name, serial: serial,
+      vendor: $("rVendor").value.trim(), type: $("rType").value.trim(), location: $("rLoc").value.trim()
+    })});
+    $("regDlg").close();
+    toast("Registered " + name + " ✓ — its QR is on the label sheet");
+    load();
+  } catch(err){
+    re.textContent = "Couldn’t register: " + String(err.message || err);
+    re.style.display = "block";
+    delete re.dataset.confirmDup;
+    $("rSubmit").disabled = false;
+    $("rSubmit").textContent = "Register";
+  }
+}
+
 function wire(){
   ["q","fType","fVendor","fStatus"].forEach(id => $(id).addEventListener("input", render));
   $("list").addEventListener("click", ev => {
@@ -932,6 +1015,9 @@ function wire(){
     const b = ev.target.closest("button[data-rm]");
     if (b){ cart.splice(+b.dataset.rm, 1); refreshCartViews(); }
   });
+  $("regBtn").addEventListener("click", openRegister);
+  $("regForm").addEventListener("submit", submitRegister);
+  $("rCancel").addEventListener("click", () => $("regDlg").close());
   $("selectBtn").addEventListener("click", toggleSelectMode);
   $("selCheckout").addEventListener("click", openCartDialog);
   $("selAllBorrowed").addEventListener("click", () => {
