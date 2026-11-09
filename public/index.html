@@ -139,7 +139,7 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 .derr{color:var(--bad-text); font-size:13px; margin:0; display:none; text-align:center}
 
 /* ---- QR scanner ---- */
-#scanBtn{height:38px; border-radius:11px; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px}
+#scanBtn,#selectBtn{height:38px; border-radius:11px; flex:0 0 auto; display:inline-flex; align-items:center; gap:7px}
 .scanbox{position:relative; margin:12px 20px 0; border-radius:16px; overflow:hidden; background:#000; aspect-ratio:1}
 .scanbox video{width:100%; height:100%; object-fit:cover; display:block}
 .scanbox::after{content:""; position:absolute; inset:16%; border:2px solid rgba(255,255,255,.85); border-radius:14px;
@@ -154,6 +154,17 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 .scancart .citem button{all:unset; cursor:pointer; flex:none; width:19px; height:19px; line-height:19px; text-align:center;
   border-radius:50%; background:rgba(60,60,67,.14); font-size:11px}
 .scancart .citem button:active{opacity:.5}
+
+/* ---- select mode + batch bar ---- */
+body.select-mode li.item{cursor:pointer}
+.pick{width:22px; height:22px; margin:0; accent-color:var(--accent); pointer-events:none}
+#selbar{position:fixed; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom,0px)); z-index:40;
+  display:flex; align-items:center; gap:10px; max-width:94vw;
+  background:rgba(238,238,243,.78); border:1px solid var(--glass-line); border-radius:999px; padding:8px 8px 8px 10px;
+  backdrop-filter:blur(24px) saturate(1.6); -webkit-backdrop-filter:blur(24px) saturate(1.6);
+  box-shadow:0 12px 40px rgba(20,20,35,.3)}
+#selbar span{font-size:14px; font-weight:600; white-space:nowrap}
+#selbar .act{white-space:nowrap}
 
 /* ---- QR label sheet ---- */
 .labels-actions{display:flex; gap:8px; margin-block:0 10px}
@@ -173,7 +184,7 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
 
 @media print{
   body{background:#fff!important; padding:0}
-  body::before,#toast{display:none!important}
+  body::before,#toast,#selbar{display:none!important}
   body.labels-mode .navrow, body.labels-mode header.top, body.labels-mode footer,
   body.labels-mode .labels-actions, body.labels-mode .labels-note{display:none!important}
   .label{border-color:#000}
@@ -218,6 +229,7 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
       <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3M3 12h18"/></svg>
       Scan
     </button>
+    <button class="act secondary" id="selectBtn" type="button" title="Select several items, then check them out together">Select</button>
     <input type="search" id="q" placeholder="Search name or serial…" aria-label="Search items">
     <select id="fType" aria-label="Filter by type"><option value="">All types</option></select>
     <select id="fVendor" aria-label="Filter by vendor"><option value="">All vendors</option></select>
@@ -298,6 +310,12 @@ dialog label input{font-weight:400; font-size:16px; text-transform:none; letter-
     <button type="button" class="act" id="scanDone" disabled>Check out</button>
   </div>
 </dialog>
+
+<div id="selbar" hidden>
+  <button class="act secondary" id="selAllBorrowed" type="button">All borrowed</button>
+  <span id="selCount">Nothing selected</span>
+  <button class="act" id="selCheckout" type="button" disabled>Check out</button>
+</div>
 
 <div id="toast" role="status"></div>
 
@@ -407,7 +425,11 @@ function render(){
       : s === "Borrowed" ? '<span class="chip bo">Borrowed</span>'
       : s === "Unavailable" ? '<span class="chip un">Unavailable</span>'
       : '<span class="chip av">Available</span>';
-    const btn = s === "Borrowed"
+    const btn = selectMode
+      ? (s !== "Unavailable"
+        ? '<input type="checkbox" class="pick"' + (cart.some(c => c.id === it.id) ? " checked" : "") + ' aria-label="Select ' + esc(it.Name || "item") + '">'
+        : "")
+      : s === "Borrowed"
       ? '<button class="act secondary" data-return="' + esc(it.url) + '"' + (pend ? " disabled" : "") + '>Return</button>'
       : s === "Available"
       ? '<button class="act" data-borrow="' + esc(it.url) + '"' + (pend ? " disabled" : "") + '>Borrow</button>' : "";
@@ -421,7 +443,7 @@ function render(){
         bf("Since", fmtDate(rec.bon)) +
         bf("Note", rec.note) +
         "</div>" : "";
-    return '<li class="item' + (od ? " overdue" : "") + (pend ? " pending" : "") + '">' +
+    return '<li class="item' + (od ? " overdue" : "") + (pend ? " pending" : "") + '" data-url="' + esc(it.url) + '">' +
       '<div class="iname"><a href="' + esc(it.url) + '" target="_blank" rel="noopener" title="Open in Notion">' + esc(it.Name || "(unnamed)") + "</a></div>" +
       '<div class="imeta">' +
         (it.type ? '<span class="tag">' + esc(it.type) + "</span>" : "") +
@@ -551,8 +573,36 @@ function notify(msg){
   else toast(msg);
 }
 
-/* ---- scan cart: scan several, check out once ---- */
+/* ---- scan cart: scan several (or tick several), check out once ---- */
 let cart = [];
+let selectMode = false;
+
+function toggleCart(it){
+  if (statusOf(it) === "Unavailable") return;
+  const i = cart.findIndex(c => c.id === it.id);
+  if (i >= 0) cart.splice(i, 1); else cart.push(it);
+  refreshCartViews();
+}
+
+function refreshCartViews(){ updateCartUI(); updateSelBar(); }
+
+function updateSelBar(){
+  const bar = $("selbar");
+  bar.hidden = !selectMode || document.body.classList.contains("labels-mode");
+  if (bar.hidden) return;
+  const nR = cart.filter(c => statusOf(c) === "Borrowed").length, nB = cart.length - nR;
+  $("selCount").textContent = !cart.length ? "Nothing selected"
+    : (nB ? nB + " to borrow" : "") + (nB && nR ? ", " : "") + (nR ? nR + " to return" : "");
+  $("selCheckout").disabled = !cart.length;
+}
+
+function toggleSelectMode(){
+  selectMode = !selectMode;
+  document.body.classList.toggle("select-mode", selectMode);
+  $("selectBtn").textContent = selectMode ? "Done" : "Select";
+  updateSelBar();
+  render();
+}
 
 function updateCartUI(){
   const box = $("scanCart");
@@ -576,7 +626,7 @@ function addToCart(it){
   cart.push(it);
   beep();
   $("scanErr").style.display = "none";
-  updateCartUI();
+  refreshCartViews();
 }
 
 function openCartDialog(){
@@ -638,7 +688,9 @@ async function submitCart(name){
     }
     $("dlg").close();
     toast("Saved " + total + (total === 1 ? " item ✓" : " items ✓"));
-    render();
+    refreshCartViews();
+    if (selectMode) toggleSelectMode();   // batch done — back to the normal list
+    else render();
     load();
   } catch(err){
     const de = $("dErr");
@@ -760,6 +812,7 @@ async function showLabels(){
   document.body.classList.add("labels-mode");
   ["summary","toolbar","metaLine","status","list"].forEach(id => $(id).hidden = true);
   $("labels").hidden = false;
+  updateSelBar();
   window.scrollTo(0, 0);
 }
 
@@ -767,12 +820,20 @@ function hideLabels(){
   document.body.classList.remove("labels-mode");
   $("labels").hidden = true;
   $("list").hidden = false;   // render() toggles the other panels but not the list itself
+  updateSelBar();
   render();
 }
 
 function wire(){
   ["q","fType","fVendor","fStatus"].forEach(id => $(id).addEventListener("input", render));
   $("list").addEventListener("click", ev => {
+    if (selectMode){
+      if (ev.target.closest("a")) return;   // Notion links still work while selecting
+      const li = ev.target.closest("li.item[data-url]");
+      const it = li && items.find(i => i.url === li.dataset.url);
+      if (it){ toggleCart(it); render(); }
+      return;
+    }
     const b = ev.target.closest("button[data-borrow]"), r = ev.target.closest("button[data-return]");
     const url = b ? b.dataset.borrow : r ? r.dataset.return : null;
     if (!url) return;
@@ -787,7 +848,14 @@ function wire(){
   $("scanDone").addEventListener("click", () => { stopScan(); openCartDialog(); });
   $("scanCart").addEventListener("click", ev => {
     const b = ev.target.closest("button[data-rm]");
-    if (b){ cart.splice(+b.dataset.rm, 1); updateCartUI(); }
+    if (b){ cart.splice(+b.dataset.rm, 1); refreshCartViews(); }
+  });
+  $("selectBtn").addEventListener("click", toggleSelectMode);
+  $("selCheckout").addEventListener("click", openCartDialog);
+  $("selAllBorrowed").addEventListener("click", () => {
+    items.filter(i => statusOf(i) === "Borrowed" && !cart.some(c => c.id === i.id)).forEach(i => cart.push(i));
+    refreshCartViews();
+    render();
   });
   $("labelsLink").addEventListener("click", ev => { ev.preventDefault(); showLabels(); });
   $("labelsBack").addEventListener("click", hideLabels);
