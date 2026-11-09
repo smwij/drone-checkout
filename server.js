@@ -121,13 +121,20 @@ async function handleApi(req, body) {
     if (body.vendor) props["Drone Vendor"] = { select: { name: body.vendor } };
     if (body.type) props["Type"] = { select: { name: body.type } };
     if (body.location) props["Location"] = { select: { name: body.location } };
-    let cover;
+    let extra = {};
     if (body.photo) {
-      const fid = await notionUpload(body.photo, (body.name.replace(/[^\w.-]+/g, "_") || "drone") + ".jpg");
-      cover = { type: "file_upload", file_upload: { id: fid } };
+      // One upload per attachment (Notion attaches an upload only once):
+      // image block in the page body + cover for gallery/app thumbnails.
+      const fname = (body.name.replace(/[^\w.-]+/g, "_") || "drone") + ".jpg";
+      const blockId = await notionUpload(body.photo, fname);
+      const coverId = await notionUpload(body.photo, fname);
+      extra = {
+        children: [{ object: "block", type: "image", image: { type: "file_upload", file_upload: { id: blockId } } }],
+        cover: { type: "file_upload", file_upload: { id: coverId } }
+      };
     }
     const pg = await notion("POST", "/pages",
-      Object.assign({ parent: { database_id: STOCK_DB }, properties: props }, cover ? { cover: cover } : {}));
+      Object.assign({ parent: { database_id: STOCK_DB }, properties: props }, extra));
     return { ok: true, id: pg.id, url: appUrl(pg.id) };
   }
   if (req.method === "POST" && req.url === "/api/return") {
