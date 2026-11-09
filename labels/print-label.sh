@@ -49,17 +49,14 @@ make_qr(){ # $1=payload $2=outfile  — sized to fill the tape height
 }
 
 print_one(){ # $1=png $2=name $3=serial
+  # Compose a compact label: QR on top, name + serial underneath (short labels).
+  local lbl="${1%.png}-label.png"
+  python3 compose.py "$1" "$lbl" "$MAX" "${2:-}" "${3:-}"
   if [ "$DRY" = 1 ]; then
-    echo "dry-run: $1  (${2:-ad-hoc})"
+    echo "dry-run: $lbl  (${2:-ad-hoc})"
     return
   fi
-  local text="${2:-}"
-  [ -n "${3:-}" ] && text="$text"$'\n'"SN $3"
-  if [ -n "$text" ]; then
-    "$PT" --image "$1" --pad 8 --text "$text"
-  else
-    "$PT" --image "$1"
-  fi
+  "$PT" --image "$lbl"
 }
 
 if [ -n "$ADHOC" ]; then
@@ -87,10 +84,24 @@ match_lines(){
 
 [ "$ALL" = 1 ] || [ "${#ARGS[@]}" -gt 0 ] || { echo "Nothing to print. See usage at top of script."; exit 1; }
 
+# Compose every requested label, then print them as ONE strip with dotted
+# cut-marks between labels — the printer's feed-to-cutter blank happens once
+# per batch instead of after every label.
+LABELS=()
 while IFS=$'\t' read -r id name serial; do
   [ -n "$id" ] || continue
   png="$OUT/$id.png"
   make_qr "$BASE_URL/?scan=$id" "$png"
-  echo "Printing: $name ${serial:+(SN $serial)}"
-  print_one "$png" "$name" "$serial"
+  lbl="$OUT/$id-label.png"
+  python3 compose.py "$png" "$lbl" "$MAX" "$name" "$serial"
+  echo "Queued: $name ${serial:+(SN $serial)}"
+  LABELS+=("$lbl")
 done < <(match_lines)
+
+STRIP="$OUT/strip.png"
+python3 concat.py "$STRIP" "${LABELS[@]}"
+if [ "$DRY" = 1 ]; then
+  echo "dry-run: $STRIP"
+else
+  "$PT" --image "$STRIP"
+fi
