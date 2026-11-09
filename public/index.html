@@ -776,18 +776,37 @@ async function startScan(){
   const canvas = document.createElement("canvas");
   const cx = canvas.getContext("2d", { willReadFrequently: true });
 
+  // Several labels can be in frame at once (uncut sheets, labels side by side):
+  // decode them all and take the one nearest the center of the guide box.
+  const nearestCenter = (codes, w, h) => {
+    let best = null, bd = Infinity;
+    for (const c of codes){
+      const d = (c.cx - w/2) * (c.cx - w/2) + (c.cy - h/2) * (c.cy - h/2);
+      if (d < bd){ bd = d; best = c; }
+    }
+    return best && best.text;
+  };
+
   const tick = async () => {
     if (!scanStream) return;
     if (video.readyState >= 2 && video.videoWidth){
       let code = null;
       if (detector){
-        try { const found = await detector.detect(video); code = found[0] && found[0].rawValue; } catch(e){}
+        try {
+          const found = await detector.detect(video);
+          code = nearestCenter(found.map(f => ({ text: f.rawValue,
+            cx: f.boundingBox.x + f.boundingBox.width / 2, cy: f.boundingBox.y + f.boundingBox.height / 2 })),
+            video.videoWidth, video.videoHeight);
+        } catch(e){}
       } else if (zx){
         const w = canvas.width = video.videoWidth, h = canvas.height = video.videoHeight;
         cx.drawImage(video, 0, 0);   // full resolution — zxing is fast enough (~4 ms) and small codes need it
         try {
-          const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h), { formats: ["QRCode"], maxNumberOfSymbols: 1, tryHarder: true });
-          code = r[0] && r[0].isValid && r[0].text;
+          const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h), { formats: ["QRCode"], maxNumberOfSymbols: 8, tryHarder: true });
+          code = nearestCenter(r.filter(x => x.isValid).map(x => {
+            const p = x.position;
+            return { text: x.text, cx: (p.topLeft.x + p.bottomRight.x) / 2, cy: (p.topLeft.y + p.bottomRight.y) / 2 };
+          }), w, h);
         } catch(e){}
       } else {
         const w = canvas.width = Math.min(640, video.videoWidth);
