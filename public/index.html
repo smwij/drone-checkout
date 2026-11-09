@@ -728,6 +728,16 @@ function loadScript(src){
 }
 
 let scanStream = null, scanTick = 0, lastScan = { code: "", t: 0 };
+let zxReader = null;   // cached zxing-wasm module
+
+// Decoder preference: native BarcodeDetector → zxing-wasm (fast WASM, reads
+// small/far codes jsQR can't) → jsQR as a last resort if the CDN is down.
+async function loadZXing(){
+  if (zxReader) return zxReader;
+  const m = await import("https://cdn.jsdelivr.net/npm/zxing-wasm@2.2.0/reader/+esm");
+  await m.prepareZXingModule({ fireImmediately: true });   // fetch the .wasm up front
+  return (zxReader = m);
+}
 
 async function startScan(){
   if (!haveData){ toast("Inventory hasn't loaded yet."); return; }
@@ -735,7 +745,8 @@ async function startScan(){
   updateCartUI();   // keep anything scanned before a cancelled checkout
   $("scanDlg").showModal();
   try {
-    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    scanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
   } catch(e){
     notify("Camera unavailable (" + (e.name || e.message) + "). You can also scan a label with your phone's own camera app — it opens this page.");
     return;
@@ -752,9 +763,15 @@ async function startScan(){
         detector = new BarcodeDetector({ formats: ["qr_code"] });
     } catch(e){}
   }
-  if (!detector && !window.jsQR){
-    try { await loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"); }
-    catch(e){ notify(e.message); return; }
+  let zx = null;
+  if (!detector){
+    try { zx = await loadZXing(); }
+    catch(e){
+      if (!window.jsQR){
+        try { await loadScript("https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"); }
+        catch(e2){ notify(e2.message); return; }
+      }
+    }
   }
   const canvas = document.createElement("canvas");
   const cx = canvas.getContext("2d", { willReadFrequently: true });
@@ -765,6 +782,13 @@ async function startScan(){
       let code = null;
       if (detector){
         try { const found = await detector.detect(video); code = found[0] && found[0].rawValue; } catch(e){}
+      } else if (zx){
+        const w = canvas.width = video.videoWidth, h = canvas.height = video.videoHeight;
+        cx.drawImage(video, 0, 0);   // full resolution — zxing is fast enough (~4 ms) and small codes need it
+        try {
+          const r = await zx.readBarcodes(cx.getImageData(0, 0, w, h), { formats: ["QRCode"], maxNumberOfSymbols: 1, tryHarder: true });
+          code = r[0] && r[0].isValid && r[0].text;
+        } catch(e){}
       } else {
         const w = canvas.width = Math.min(640, video.videoWidth);
         const h = canvas.height = Math.round(video.videoHeight * w / video.videoWidth);
@@ -782,7 +806,7 @@ async function startScan(){
         }
       }
     }
-    scanTick = setTimeout(tick, 120);
+    scanTick = setTimeout(tick, (detector || zx) ? 60 : 150);   // fast decoders can poll faster
   };
   tick();
 }

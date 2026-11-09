@@ -23,8 +23,9 @@ Supermarket-style scanning:
    form opens immediately. Scanning also accepts a typed serial number.
 
 QR decoding uses the browser's native `BarcodeDetector` where available,
-falling back to jsQR from a CDN; label rendering uses qrcode.js from a
-CDN (both loaded only when used).
+then zxing-wasm (fast WASM decoder, reads small/far codes) from a CDN,
+with jsQR as a last resort; label rendering uses qrcode.js from a CDN.
+All are loaded only when used.
 
 ## 1. Notion setup (one time)
 
