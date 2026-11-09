@@ -122,16 +122,17 @@ async function handleApi(req, body) {
     if (body.type) props["Type"] = { select: { name: body.type } };
     if (body.location) props["Location"] = { select: { name: body.location } };
     let extra = {};
-    if (body.photo) {
-      // One upload per attachment (Notion attaches an upload only once):
-      // image block in the page body + cover for gallery/app thumbnails.
-      const fname = (body.name.replace(/[^\w.-]+/g, "_") || "drone") + ".jpg";
-      const blockId = await notionUpload(body.photo, fname);
-      const coverId = await notionUpload(body.photo, fname);
-      extra = {
-        children: [{ object: "block", type: "image", image: { type: "file_upload", file_upload: { id: blockId } } }],
-        cover: { type: "file_upload", file_upload: { id: coverId } }
-      };
+    const photos = Array.isArray(body.photos) ? body.photos.slice(0, 8)
+      : body.photo ? [body.photo] : [];
+    if (photos.length) {
+      // Each photo becomes an image block in the page body (no page cover).
+      const base = body.name.replace(/[^\w.-]+/g, "_") || "drone";
+      const children = [];
+      for (let i = 0; i < photos.length; i++) {
+        const fid = await notionUpload(photos[i], base + "-" + (i + 1) + ".jpg");
+        children.push({ object: "block", type: "image", image: { type: "file_upload", file_upload: { id: fid } } });
+      }
+      extra = { children: children };
     }
     const pg = await notion("POST", "/pages",
       Object.assign({ parent: { database_id: STOCK_DB }, properties: props }, extra));

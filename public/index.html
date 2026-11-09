@@ -91,7 +91,11 @@ li.item + li.item{border-top:.5px solid var(--line)}
 li.item.overdue{background:var(--bad-tint)}
 .iname{font-weight:600; font-size:16px; min-width:0; overflow-wrap:anywhere; display:flex; align-items:center; gap:9px}
 .thumb{width:42px; height:42px; object-fit:cover; border-radius:9px; flex:none; border:1px solid var(--glass-line)}
-#rPreview{max-width:120px; max-height:120px; object-fit:cover; border-radius:12px; align-self:center; border:1px solid var(--glass-line)}
+.previews{display:flex; flex-wrap:wrap; gap:8px}
+.previews .pv{position:relative}
+.previews img{width:72px; height:72px; object-fit:cover; border-radius:10px; display:block; border:1px solid var(--glass-line)}
+.previews button{all:unset; cursor:pointer; position:absolute; top:-6px; right:-6px; width:20px; height:20px; line-height:20px;
+  text-align:center; border-radius:50%; background:rgba(30,30,36,.85); color:#fff; font-size:11px}
 .serialrow{display:flex; gap:8px}
 .serialrow input{flex:1; min-width:0}
 .serialrow button{height:42px; border-radius:11px; min-width:52px; padding:0}
@@ -347,15 +351,15 @@ body.select-mode li.item{cursor:pointer}
     <label>Type
       <input id="rType" list="typeList" maxlength="40" autocomplete="off">
     </label>
-    <label>Photo (optional)
+    <label>Photos (optional, up to 6)
       <div class="serialrow">
-        <input id="rPhoto" type="file" accept="image/*">
-        <button type="button" class="act" id="rTake" title="Take a photo with the camera">
+        <input id="rPhoto" type="file" accept="image/*" multiple>
+        <button type="button" class="act" id="rTake" title="Take photos with the camera">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
         </button>
       </div>
     </label>
-    <img id="rPreview" alt="" hidden>
+    <div id="rPreviews" class="previews" hidden></div>
     <p class="derr" id="rErr"></p>
     <div class="dbtns">
       <button type="button" class="act secondary" id="rCancel">Cancel</button>
@@ -808,6 +812,7 @@ async function startScan(capture){
     : "Scan one label after another — each beep adds it to the cart. Then press Check out and fill the details once.";
   $("scanDone").hidden = !!(scanCapture || scanPhotoMode);
   $("scanShutter").hidden = !scanPhotoMode;
+  $("scanCancel").textContent = scanPhotoMode ? "Done" : "Cancel";
   if (scanCapture || scanPhotoMode) $("scanCart").hidden = true;
   else updateCartUI();   // keep anything scanned before a cancelled checkout
   $("scanDlg").showModal();
@@ -989,7 +994,8 @@ function hideLabels(){
 }
 
 /* ---- register a new drone ---- */
-let regPhoto = "";   // resized JPEG data URL, ready to upload
+const MAX_PHOTOS = 6;
+let regPhotos = [];   // resized JPEG data URLs, ready to upload
 
 function loadImageFile(file){
   return new Promise((res, rej) => {
@@ -1001,29 +1007,36 @@ function loadImageFile(file){
   });
 }
 
-function setRegPhoto(url){
-  regPhoto = url;
-  const pv = $("rPreview");
-  pv.src = url;
-  pv.hidden = false;
+function renderPreviews(){
+  const box = $("rPreviews");
+  box.hidden = !regPhotos.length;
+  box.innerHTML = regPhotos.map((u, i) =>
+    '<span class="pv"><img src="' + u + '" alt=""><button type="button" data-rmp="' + i + '" aria-label="Remove photo">✕</button></span>').join("");
+}
+
+function addRegPhoto(url){
+  if (regPhotos.length >= MAX_PHOTOS){ toast("Up to " + MAX_PHOTOS + " photos."); return false; }
+  regPhotos.push(url);
+  renderPreviews();
+  return true;
 }
 
 async function pickPhoto(){
-  const file = $("rPhoto").files && $("rPhoto").files[0];
-  regPhoto = "";
-  $("rPreview").hidden = true;
-  if (!file) return;
-  try {
-    const im = await loadImageFile(file);
-    const s = Math.min(1, 1600 / Math.max(im.width, im.height));   // keep uploads small
-    const c = document.createElement("canvas");
-    c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
-    c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
-    setRegPhoto(c.toDataURL("image/jpeg", 0.82));
-  } catch(e){
-    const re = $("rErr");
-    re.textContent = "Photo problem: " + String(e.message || e);
-    re.style.display = "block";
+  const files = [...($("rPhoto").files || [])];
+  $("rPhoto").value = "";   // allow re-picking the same file later
+  for (const file of files){
+    try {
+      const im = await loadImageFile(file);
+      const s = Math.min(1, 1600 / Math.max(im.width, im.height));   // keep uploads small
+      const c = document.createElement("canvas");
+      c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+      c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+      if (!addRegPhoto(c.toDataURL("image/jpeg", 0.82))) break;
+    } catch(e){
+      const re = $("rErr");
+      re.textContent = "Photo problem: " + String(e.message || e);
+      re.style.display = "block";
+    }
   }
 }
 
@@ -1036,8 +1049,8 @@ function openRegister(){
   fill("vendorList", items.map(i => i.vendor));
   fill("typeList", items.map(i => i.type));
   $("regForm").reset();
-  regPhoto = "";
-  $("rPreview").hidden = true;
+  regPhotos = [];
+  renderPreviews();
   const re = $("rErr"); re.style.display = "none"; delete re.dataset.confirmDup;
   $("rSubmit").disabled = false;
   $("rSubmit").textContent = "Register";
@@ -1062,7 +1075,8 @@ async function submitRegister(ev){
   try {
     await api("/api/register", { method: "POST", body: JSON.stringify({
       name: name, serial: serial,
-      vendor: $("rVendor").value.trim(), type: $("rType").value.trim(), photo: regPhoto || undefined
+      vendor: $("rVendor").value.trim(), type: $("rType").value.trim(),
+      photos: regPhotos.length ? regPhotos : undefined
     })});
     $("regDlg").close();
     toast("Registered " + name + " ✓ — its QR is on the label sheet");
@@ -1116,11 +1130,15 @@ function wire(){
     c.width = Math.round(video.videoWidth * s);
     c.height = Math.round(video.videoHeight * s);
     c.getContext("2d").drawImage(video, 0, 0, c.width, c.height);
-    const url = c.toDataURL("image/jpeg", 0.85);
+    if (!addRegPhoto(c.toDataURL("image/jpeg", 0.85))) return stopScan();   // hit the photo limit
     beep();
-    stopScan();
-    setRegPhoto(url);
-    try { $("rPhoto").value = ""; } catch(e){}   // the taken photo replaces any picked file
+    // stay open for the next shot
+    $("scanHint").textContent = regPhotos.length + (regPhotos.length === 1 ? " photo" : " photos") +
+      " taken — capture more or press Done.";
+  });
+  $("rPreviews").addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-rmp]");
+    if (b){ regPhotos.splice(+b.dataset.rmp, 1); renderPreviews(); }
   });
   $("selectBtn").addEventListener("click", toggleSelectMode);
   $("selCheckout").addEventListener("click", openCartDialog);
