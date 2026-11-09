@@ -654,6 +654,7 @@ async function showLabels(){
 function hideLabels(){
   document.body.classList.remove("labels-mode");
   $("labels").hidden = true;
+  $("list").hidden = false;   // render() toggles the other panels but not the list itself
   render();
 }
 
